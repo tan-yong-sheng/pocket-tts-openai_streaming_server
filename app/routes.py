@@ -164,9 +164,9 @@ def generate_speech():
         use_text_preprocess = current_app.config.get('TEXT_PREPROCESS_DEFAULT', False)
         # Preprocess text
         if use_text_preprocess:
-            #logger.info(f'Preprocessing text: {text}')
+            # logger.info(f'Preprocessing text: {text}')
             text = text_preprocessor.process(text)
-            #logger.info(f'Preprocessed text: {text}')
+            # logger.info(f'Preprocessed text: {text}')
         if use_streaming:
             return _stream_audio(tts, voice_state, text, target_format)
         return _generate_file(tts, voice_state, text, target_format)
