@@ -13,6 +13,7 @@ Tested and working fully with [WingmanAI by Shipbit](https://www.wingman-ai.com/
 - 🐳 **Docker Ready** - One-command deployment
 - 💻 **Cross-platform** - Runs on Windows, macOS, and Linux
 - ⚡ **CPU Optimized** - No GPU required
+- 🎤 **Text pre-processing** - Clean text for words and symbols TTS usually has difficulty with, automatically
 
 ## Quick Start
 
@@ -70,6 +71,9 @@ python server.py --port 8080 --voices-dir ./my_voices
 
 # Enable streaming by default
 python server.py --stream
+
+# Enable text preprocessing
+python server.py --text-preprocess
 ```
 
 ### Option 3: Windows Executable
@@ -182,7 +186,7 @@ with client.audio.speech.with_streaming_response.create(
 
 ### Voice File Guidelines
 
-- **Duration:** 3-10 seconds of clear speech works best
+- **Duration:** 3-15 seconds of clear speech works best
 - **Quality:** Clean audio without background noise
 - **Format:** WAV, MP3, or FLAC
 - **Tip:** Use [Adobe Podcast Enhance](https://podcast.adobe.com/enhance) to clean noisy samples
@@ -198,16 +202,17 @@ The `voices/` directory includes 150+ community-contributed voices.
 
 ### Environment Variables
 
-| Variable                    | Default    | Description                            |
-| --------------------------- | ---------- | -------------------------------------- |
-| `POCKET_TTS_HOST`           | `0.0.0.0`  | Server bind address                    |
-| `POCKET_TTS_PORT`           | `49112`    | Server port                            |
-| `POCKET_TTS_VOICES_DIR`     | `./voices` | Custom voices directory                |
-| `POCKET_TTS_MODEL_PATH`     | -          | Custom model path                      |
-| `POCKET_TTS_STREAM_DEFAULT` | `true`     | Enable streaming by default            |
-| `POCKET_TTS_LOG_LEVEL`      | `INFO`     | Log level: DEBUG, INFO, WARNING, ERROR |
-| `POCKET_TTS_LOG_DIR`        | `./logs`   | Log files directory                    |
-| `HF_TOKEN`                  | -          | Hugging Face token (for voice cloning) |
+| Variable                            | Default    | Description                            |
+| ------------------------------------| ---------- | -------------------------------------- |
+| `POCKET_TTS_HOST`                   | `0.0.0.0`  | Server bind address                    |
+| `POCKET_TTS_PORT`                   | `49112`    | Server port                            |
+| `POCKET_TTS_VOICES_DIR`             | `./voices` | Custom voices directory                |
+| `POCKET_TTS_MODEL_PATH`             | -          | Custom model path                      |
+| `POCKET_TTS_STREAM_DEFAULT`         | `true`     | Enable streaming by default            |
+| `POCKET_TTS_TEXT_PREPROCESS_DEFAULT`| `true`     | Enable text preprocessing by default   |
+| `POCKET_TTS_LOG_LEVEL`              | `INFO`     | Log level: DEBUG, INFO, WARNING, ERROR |
+| `POCKET_TTS_LOG_DIR`                | `./logs`   | Log files directory                    |
+| `HF_TOKEN`                          | -          | Hugging Face token (for voice cloning) |
 
 ### Docker Compose Options
 
@@ -230,6 +235,7 @@ pocket-tts-openai_streaming_server/
 │   └── services/          # Business logic
 │       ├── audio.py       # Audio conversion
 │       └── tts.py         # TTS service
+|       |-- preprocess.py  # Text preprocessor
 ├── static/                 # Web UI assets
 ├── templates/              # HTML templates
 ├── voices/                 # Voice files
