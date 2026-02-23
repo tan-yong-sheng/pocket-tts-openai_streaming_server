@@ -41,7 +41,12 @@ class Config:
     VOICES_DIR = os.environ.get('POCKET_TTS_VOICES_DIR', None)
 
     # Streaming default
-    STREAM_DEFAULT = os.environ.get('POCKET_TTS_STREAM_DEFAULT', 'true').lower() == 'true'
+    STREAM_DEFAULT = os.environ.get('POCKET_TTS_STREAM_DEFAULT', 'false').lower() == 'true'
+
+    # Text preprocessing default
+    TEXT_PREPROCESS_DEFAULT = (
+        os.environ.get('POCKET_TTS_TEXT_PREPROCESS_DEFAULT', 'false').lower() == 'true'
+    )
 
     # Docker detection
     @staticmethod

@@ -62,6 +62,12 @@ set "STREAM_ARG=--stream"
 set /p "INPUT_STREAM=Enable Streaming? (Y/N) [Y]: "
 if /i "%INPUT_STREAM%"=="N" set "STREAM_ARG="
 
+:: 7. Text Preprocessing Default
+:: Defaults to ON. Only unsets if the user types 'N'.
+set "TEXT_PREPROCESS_ARG=--text-preprocess"
+set /p "INPUT_PREPROCESS=Enable Text Preprocessing? (Y/N) [Y]: "
+if /i "%INPUT_PREPROCESS%"=="N" set "TEXT_PREPROCESS_ARG="
+
 echo.
 echo ========================================================
 echo Starting Pocket TTS Server...
@@ -70,11 +76,12 @@ echo Port: %PORT%
 if defined MODEL_PATH echo Model: %MODEL_PATH%
 if defined VOICES_DIR echo Voices: %VOICES_DIR%
 if defined STREAM_ARG echo Streaming: Enabled
+if defined TEXT_PREPROCESS_ARG echo Text Preprocessing: Enabled
 echo ========================================================
 echo.
 
-:: 7. Run Command
-python server.py --host %HOST% --port %PORT% %MODEL_PATH% %VOICES_DIR_ARG% %STREAM_ARG%
+:: 8. Run Command
+python server.py --host %HOST% --port %PORT% %MODEL_PATH% %VOICES_DIR_ARG% %STREAM_ARG% %TEXT_PREPROCESS_ARG%
 
 if %ERRORLEVEL% NEQ 0 (
     echo.

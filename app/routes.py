@@ -22,12 +22,25 @@ from app.services.audio import (
     validate_format,
     write_wav_header,
 )
+from app.services.preprocess import TextPreprocessor
 from app.services.tts import get_tts_service
 
 logger = get_logger('routes')
 
 # Create blueprint
 api = Blueprint('api', __name__)
+
+# Create text preprocessor instance, some options changed from defaults
+text_preprocessor = TextPreprocessor(
+    remove_urls=False,
+    remove_emails=False,
+    remove_html=True,
+    remove_hashtags=True,
+    remove_mentions=False,
+    remove_punctuation=False,
+    remove_stopwords=False,
+    remove_extra_whitespace=False,
+)
 
 
 @api.route('/')
@@ -147,7 +160,13 @@ def generate_speech():
                 target_format,
             )
             use_streaming = False
-
+        # Check if text preprocessing should be used
+        use_text_preprocess = current_app.config.get('TEXT_PREPROCESS_DEFAULT', False)
+        # Preprocess text
+        if use_text_preprocess:
+            #logger.info(f'Preprocessing text: {text}')
+            text = text_preprocessor.process(text)
+            #logger.info(f'Preprocessed text: {text}')
         if use_streaming:
             return _stream_audio(tts, voice_state, text, target_format)
         return _generate_file(tts, voice_state, text, target_format)
