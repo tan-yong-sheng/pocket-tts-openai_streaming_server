@@ -8,6 +8,24 @@ import sys
 from pathlib import Path
 
 
+def _int_env(name: str, default: int | None = None) -> int | None:
+    value = os.environ.get(name, '').strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _csv_env(name: str) -> list[str] | None:
+    value = os.environ.get(name, '')
+    if not value:
+        return None
+    tokens = [item.strip() for item in value.split(',') if item.strip()]
+    return tokens or None
+
+
 def get_base_path() -> Path:
     """Get the base path for the application, handling PyInstaller frozen state."""
     if getattr(sys, 'frozen', False):
@@ -70,6 +88,32 @@ class Config:
     LOG_FILE = os.environ.get('POCKET_TTS_LOG_FILE', 'pocket_tts.log')
     LOG_MAX_BYTES = int(os.environ.get('POCKET_TTS_LOG_MAX_BYTES', str(10 * 1024 * 1024)))  # 10MB
     LOG_BACKUP_COUNT = int(os.environ.get('POCKET_TTS_LOG_BACKUP_COUNT', '5'))
+    COLDSTART_LOG = os.environ.get('POCKET_TTS_COLDSTART_LOG', 'false').lower() == 'true'
+    REQUEST_TIMING_LOG = (
+        os.environ.get('POCKET_TTS_REQUEST_TIMING_LOG', 'false').lower() == 'true'
+    )
+    REQUEST_TIMING_LOG_JSON = (
+        os.environ.get('POCKET_TTS_REQUEST_TIMING_LOG_JSON', 'false').lower() == 'true'
+    )
+    UI_ENABLED = os.environ.get('POCKET_TTS_UI_ENABLED', 'true').lower() == 'true'
+    DISABLE_INFERENCE_MODE = (
+        os.environ.get('POCKET_TTS_DISABLE_INFERENCE_MODE', 'false').lower() == 'true'
+    )
+    MAX_INPUT_CHARS = _int_env('POCKET_TTS_MAX_INPUT_CHARS', 2000) or 2000
+    REQUEST_ID_HEADER = os.environ.get('POCKET_TTS_REQUEST_ID_HEADER', 'X-Request-ID')
+    TORCH_NUM_THREADS = _int_env('POCKET_TTS_TORCH_THREADS')
+    TORCH_NUM_INTEROP_THREADS = _int_env('POCKET_TTS_TORCH_INTEROP_THREADS')
+    AUTHENTICATION_ALLOWED_TOKENS = _csv_env('AUTHENTICATION_ALLOWED_TOKENS')
+
+    @classmethod
+    def is_auth_enabled(cls) -> bool:
+        return bool(cls.AUTHENTICATION_ALLOWED_TOKENS)
+
+    @classmethod
+    def is_valid_token(cls, token: str) -> bool:
+        if not cls.AUTHENTICATION_ALLOWED_TOKENS:
+            return True
+        return token in cls.AUTHENTICATION_ALLOWED_TOKENS
 
     # Built-in voice mappings (these are resolved by pocket-tts internally)
     BUILTIN_VOICES = ['alba', 'marius', 'javert', 'jean', 'fantine', 'cosette', 'eponine', 'azelma']

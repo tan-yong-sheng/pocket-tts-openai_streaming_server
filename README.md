@@ -212,6 +212,16 @@ The `voices/` directory includes 150+ community-contributed voices.
 | `POCKET_TTS_TEXT_PREPROCESS_DEFAULT`| `true`     | Enable text preprocessing by default   |
 | `POCKET_TTS_LOG_LEVEL`              | `INFO`     | Log level: DEBUG, INFO, WARNING, ERROR |
 | `POCKET_TTS_LOG_DIR`                | `./logs`   | Log files directory                    |
+| `POCKET_TTS_UI_ENABLED`             | `true`     | Enable the web UI on `/`               |
+| `POCKET_TTS_DISABLE_INFERENCE_MODE` | `false`    | Use torch.no_grad instead of inference_mode |
+| `POCKET_TTS_COLDSTART_LOG`          | `false`    | Log first-request timing (once)        |
+| `POCKET_TTS_REQUEST_TIMING_LOG`     | `false`    | Log per-request timing metrics         |
+| `POCKET_TTS_REQUEST_TIMING_LOG_JSON`| `false`    | Emit timing logs as JSON               |
+| `POCKET_TTS_MAX_INPUT_CHARS`        | `2000`     | Max input length before 413            |
+| `POCKET_TTS_REQUEST_ID_HEADER`      | `X-Request-ID` | Request ID header name             |
+| `POCKET_TTS_TORCH_THREADS`          | -          | Set torch intra-op threads             |
+| `POCKET_TTS_TORCH_INTEROP_THREADS`  | -          | Set torch inter-op threads             |
+| `AUTHENTICATION_ALLOWED_TOKENS`     | -          | Comma-separated Bearer tokens          |
 | `HF_TOKEN`                          | -          | Hugging Face token (for voice cloning) |
 
 ### Docker Compose Options

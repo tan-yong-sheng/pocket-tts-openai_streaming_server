@@ -23,6 +23,17 @@ def _ensure_pocket_tts():
     global TTSModel
     if TTSModel is None:
         try:
+            if Config.DISABLE_INFERENCE_MODE:
+                import torch
+
+                if not getattr(torch, '_pocket_tts_inference_patched', False):
+                    # Pocket-TTS uses torch.inference_mode() decorators. On some
+                    # Torch versions this can fail with in-place cache updates.
+                    # Fall back to no_grad to avoid inference tensors.
+                    torch.inference_mode = torch.no_grad
+                    torch._pocket_tts_inference_patched = True
+                    logger.warning('Disabled torch.inference_mode for Pocket-TTS compatibility')
+
             from pocket_tts import TTSModel as _TTSModel
 
             TTSModel = _TTSModel
@@ -257,7 +268,8 @@ class TTSService:
             raise RuntimeError('Model not loaded')
 
         t0 = time.time()
-        audio = self.model.generate_audio(voice_state, text)
+        with torch.inference_mode():
+            audio = self.model.generate_audio(voice_state, text)
         gen_time = time.time() - t0
 
         logger.info(f'Generated {len(text)} chars in {gen_time:.2f}s')
@@ -278,7 +290,8 @@ class TTSService:
             raise RuntimeError('Model not loaded')
 
         logger.info(f'Starting streaming generation for {len(text)} chars')
-        yield from self.model.generate_audio_stream(voice_state, text)
+        with torch.inference_mode():
+            yield from self.model.generate_audio_stream(voice_state, text)
 
     def list_voices(self) -> list[dict]:
         """

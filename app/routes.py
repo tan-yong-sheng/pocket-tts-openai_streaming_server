@@ -2,6 +2,7 @@
 Flask routes for the OpenAI-compatible TTS API.
 """
 
+import threading
 import time
 
 from flask import (
@@ -14,6 +15,10 @@ from flask import (
     stream_with_context,
 )
 
+import json
+import uuid
+
+from app.config import Config
 from app.logging_config import get_logger
 from app.services.audio import (
     convert_audio,
@@ -26,6 +31,10 @@ from app.services.preprocess import TextPreprocessor
 from app.services.tts import get_tts_service
 
 logger = get_logger('routes')
+
+# Cold-start request logging (first request only)
+_FIRST_REQUEST_LOGGED = False
+_FIRST_REQUEST_LOCK = threading.Lock()
 
 # Create blueprint
 api = Blueprint('api', __name__)
@@ -47,6 +56,22 @@ text_preprocessor = TextPreprocessor(
 def home():
     """Serve the web interface."""
     from app.config import Config
+
+    if not Config.UI_ENABLED:
+        return (
+            jsonify(
+                {
+                    'service': 'pocket-tts',
+                    'status': 'ok',
+                    'endpoints': {
+                        'health': '/health',
+                        'voices': '/v1/voices',
+                        'speech': '/v1/audio/speech',
+                    },
+                }
+            ),
+            200,
+        )
 
     return render_template('index.html', is_docker=Config.IS_DOCKER)
 
@@ -118,19 +143,33 @@ def generate_speech():
     """
     from flask import current_app
 
-    data = request.json
+    request_start = time.monotonic()
+    request_id = request.headers.get(Config.REQUEST_ID_HEADER) or uuid.uuid4().hex
+    data = request.get_json(silent=True)
 
     if not data:
-        return jsonify({'error': 'Missing JSON body'}), 400
+        return _error_response('Missing JSON body', 400, request_id)
 
     text = data.get('input')
     if not text:
-        return jsonify({'error': "Missing 'input' text"}), 400
+        return _error_response("Missing 'input' text", 400, request_id)
+    if not isinstance(text, str):
+        return _error_response("'input' must be a string", 400, request_id)
+    if len(text) > Config.MAX_INPUT_CHARS:
+        return _error_response(
+            f"'input' exceeds max length of {Config.MAX_INPUT_CHARS} characters",
+            413,
+            request_id,
+        )
 
     voice = data.get('voice', 'alba')
+    if not isinstance(voice, str):
+        return _error_response("'voice' must be a string", 400, request_id)
     stream_request = data.get('stream', False)
 
     response_format = data.get('response_format', 'mp3')
+    if not isinstance(response_format, str):
+        return _error_response("'response_format' must be a string", 400, request_id)
     target_format = validate_format(response_format)
 
     tts = get_tts_service()
@@ -139,13 +178,15 @@ def generate_speech():
     is_valid, msg = tts.validate_voice(voice)
     if not is_valid:
         available = [v['id'] for v in tts.list_voices()]
-        return jsonify(
+        return _error_response(
+            f"Voice '{voice}' not found",
+            400,
+            request_id,
             {
-                'error': f"Voice '{voice}' not found",
                 'available_voices': available[:10],  # Limit to first 10
                 'hint': 'Use /v1/voices to see all available voices',
-            }
-        ), 400
+            },
+        )
 
     try:
         voice_state = tts.get_voice_state(voice)
@@ -168,18 +209,53 @@ def generate_speech():
             text = text_preprocessor.process(text)
             # logger.info(f'Preprocessed text: {text}')
         if use_streaming:
-            return _stream_audio(tts, voice_state, text, target_format)
-        return _generate_file(tts, voice_state, text, target_format)
+            pre_response_s = time.monotonic() - request_start
+            return _stream_audio(
+                tts, voice_state, text, target_format, request_start, pre_response_s, request_id
+            )
+        return _generate_file(tts, voice_state, text, target_format, request_start, request_id)
 
     except ValueError as e:
         logger.warning(f'Voice loading failed: {e}')
-        return jsonify({'error': str(e)}), 400
+        return _error_response(str(e), 400, request_id)
     except Exception as e:
         logger.exception('Generation failed')
-        return jsonify({'error': str(e)}), 500
+        return _error_response('Generation failed', 500, request_id)
 
 
-def _generate_file(tts, voice_state, text: str, fmt: str):
+def _emit_timing_log(event: str, metrics: dict) -> None:
+    payload = {'event': event, **metrics}
+    if Config.REQUEST_TIMING_LOG_JSON:
+        logger.info(json.dumps(payload, separators=(',', ':')))
+    else:
+        logger.info('%s: %s', event, payload)
+
+
+def _log_first_request(metrics: dict) -> None:
+    if not Config.COLDSTART_LOG:
+        return
+    global _FIRST_REQUEST_LOGGED
+    with _FIRST_REQUEST_LOCK:
+        if _FIRST_REQUEST_LOGGED:
+            return
+        _FIRST_REQUEST_LOGGED = True
+    _emit_timing_log('first_request_timing', metrics)
+
+
+def _error_response(message: str, status_code: int, request_id: str, extra: dict | None = None):
+    payload = {'error': message, 'request_id': request_id}
+    if extra:
+        payload.update(extra)
+    response = jsonify(payload)
+    response.status_code = status_code
+    response.headers[Config.REQUEST_ID_HEADER] = request_id
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+def _generate_file(
+    tts, voice_state, text: str, fmt: str, request_start: float, request_id: str
+):
     """Generate complete audio and return as file."""
     t0 = time.time()
     audio_tensor = tts.generate_audio(voice_state, text)
@@ -187,15 +263,52 @@ def _generate_file(tts, voice_state, text: str, fmt: str):
 
     logger.info(f'Generated {len(text)} chars in {generation_time:.2f}s')
 
+    convert_t0 = time.time()
     audio_buffer = convert_audio(audio_tensor, tts.sample_rate, fmt)
+    convert_time = time.time() - convert_t0
     mimetype = get_mime_type(fmt)
+    total_s = time.monotonic() - request_start
+    _log_first_request(
+        {
+            'mode': 'non_stream',
+            'format': fmt,
+            'text_len': len(text),
+            'generation_s': round(generation_time, 4),
+            'total_s': round(total_s, 4),
+            'request_id': request_id,
+        }
+    )
+    if Config.REQUEST_TIMING_LOG:
+        _emit_timing_log(
+            'request_timing',
+            {
+                'mode': 'non_stream',
+                'format': fmt,
+                'text_len': len(text),
+                'generation_s': round(generation_time, 4),
+                'convert_s': round(convert_time, 4),
+                'total_s': round(total_s, 4),
+                'request_id': request_id,
+            },
+        )
 
-    return send_file(
+    response = send_file(
         audio_buffer, mimetype=mimetype, as_attachment=True, download_name=f'speech.{fmt}'
     )
+    response.headers[Config.REQUEST_ID_HEADER] = request_id
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
-def _stream_audio(tts, voice_state, text: str, fmt: str):
+def _stream_audio(
+    tts,
+    voice_state,
+    text: str,
+    fmt: str,
+    request_start: float,
+    pre_response_s: float,
+    request_id: str,
+):
     """Stream audio chunks."""
     # Normalize streaming format: we always emit PCM bytes, optionally wrapped
     # in a WAV container. For non-PCM/WAV formats (e.g. mp3, opus), coerce to
@@ -209,17 +322,81 @@ def _stream_audio(tts, voice_state, text: str, fmt: str):
         )
         stream_fmt = 'pcm'
 
-    def generate():
+    first_log = {'done': False}
+    counters = {'bytes': 0, 'chunks': 0}
+
+    try:
         stream = tts.generate_audio_stream(voice_state, text)
-        for chunk_tensor in stream:
-            yield tensor_to_pcm_bytes(chunk_tensor)
+        first_chunk = next(stream, None)
+    except Exception:
+        logger.exception('Streaming generation failed before first chunk')
+        return _error_response('Streaming generation failed', 500, request_id)
+
+    if first_chunk is None:
+        logger.error('Streaming generation produced no audio chunks')
+        return _error_response('Streaming generation produced no audio', 500, request_id)
+
+    def _maybe_log_first_bytes():
+        if first_log['done']:
+            return
+        first_log['done'] = True
+        first_bytes_s = time.monotonic() - request_start
+        _log_first_request(
+            {
+                'mode': 'stream',
+                'format': stream_fmt,
+                'text_len': len(text),
+                'pre_response_s': round(pre_response_s, 4),
+                'first_bytes_s': round(first_bytes_s, 4),
+                'request_id': request_id,
+            }
+        )
 
     def stream_with_header():
-        # Yield WAV header first if streaming as WAV
-        if stream_fmt == 'wav':
-            yield write_wav_header(tts.sample_rate, num_channels=1, bits_per_sample=16)
-        yield from generate()
+        stream_start = time.monotonic()
+        try:
+            # Yield WAV header first if streaming as WAV
+            if stream_fmt == 'wav':
+                _maybe_log_first_bytes()
+                header = write_wav_header(tts.sample_rate, num_channels=1, bits_per_sample=16)
+                counters['bytes'] += len(header)
+                yield header
+
+            _maybe_log_first_bytes()
+            chunk_bytes = tensor_to_pcm_bytes(first_chunk)
+            counters['chunks'] += 1
+            counters['bytes'] += len(chunk_bytes)
+            yield chunk_bytes
+
+            for chunk_tensor in stream:
+                _maybe_log_first_bytes()
+                chunk_bytes = tensor_to_pcm_bytes(chunk_tensor)
+                counters['chunks'] += 1
+                counters['bytes'] += len(chunk_bytes)
+                yield chunk_bytes
+        except Exception:
+            logger.exception('Streaming generation failed mid-stream')
+        finally:
+            if Config.REQUEST_TIMING_LOG:
+                total_s = time.monotonic() - stream_start
+                _emit_timing_log(
+                    'request_timing',
+                    {
+                        'mode': 'stream',
+                        'format': stream_fmt,
+                        'text_len': len(text),
+                        'pre_response_s': round(pre_response_s, 4),
+                        'total_s': round(total_s, 4),
+                        'chunks': counters['chunks'],
+                        'bytes': counters['bytes'],
+                        'request_id': request_id,
+                    },
+                )
 
     mimetype = get_mime_type(stream_fmt)
 
-    return Response(stream_with_context(stream_with_header()), mimetype=mimetype)
+    response = Response(stream_with_context(stream_with_header()), mimetype=mimetype)
+    response.headers[Config.REQUEST_ID_HEADER] = request_id
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
