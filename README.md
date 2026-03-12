@@ -83,6 +83,13 @@ python server.py --text-preprocess
 3. Double-click `PocketTTS-Server.exe` to run with defaults
 4. Or run `run_pocket_tts_server_exe.bat` for custom configuration
 
+### Option 4: Modal.com (Serverless)
+
+For Modal deployment, follow the guide in [infra/modal/GUIDE.md](infra/modal/GUIDE.md).
+
+Modal's Starter plan includes $30/month in free compute credits
+(see [Modal pricing](https://modal.com/pricing)).
+
 ## Web Interface
 
 Open `http://localhost:49112` in your browser to access the built-in web UI:
