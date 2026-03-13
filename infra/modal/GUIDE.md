@@ -76,6 +76,9 @@ export POCKET_TTS_REQUEST_TIMING_LOG_JSON=true
 # Optional: disable the web UI at /
 export POCKET_TTS_UI_ENABLED=false
 
+# Optional: force HuggingFace offline mode (use after model is cached in volume)
+export POCKET_TTS_HF_OFFLINE=true
+
 # Optional: avoid torch.inference_mode errors in Pocket-TTS
 export POCKET_TTS_DISABLE_INFERENCE_MODE=true
 ```
@@ -132,4 +135,4 @@ curl -sS "$APP_URL/v1/audio/speech" \
 - Scale-to-zero is enabled (`min_containers=0`), so cold starts are expected.
 - Memory snapshots reduce cold-start time after the first deploy.
 - The voices directory defaults to `/app/voices` (bundled with the image).
-- If `VOICES_VOLUME_NAME` is set, `/voices` is mounted and used instead.
+- If `VOICES_VOLUME_NAME` is set, `/voices` is mounted and used instead (the image will skip bundling `voices/`).

@@ -63,6 +63,14 @@ image_env = {
     'HF_SECRET_NAME': HF_SECRET_NAME,
 }
 
+_offline = os.environ.get('POCKET_TTS_HF_OFFLINE', '').strip()
+if _offline:
+    image_env['HF_HUB_OFFLINE'] = _offline
+    image_env['TRANSFORMERS_OFFLINE'] = _offline
+elif os.environ.get('POCKET_TTS_MODEL_PATH'):
+    image_env.setdefault('HF_HUB_OFFLINE', '1')
+    image_env.setdefault('TRANSFORMERS_OFFLINE', '1')
+
 # Pass through non-secret POCKET_TTS_* settings from the local environment
 _PASSTHROUGH_ENV_KEYS = (
     'POCKET_TTS_HOST',
@@ -85,6 +93,7 @@ _PASSTHROUGH_ENV_KEYS = (
     'POCKET_TTS_TORCH_INTEROP_THREADS',
     'POCKET_TTS_UI_ENABLED',
     'POCKET_TTS_DISABLE_INFERENCE_MODE',
+    'POCKET_TTS_HF_OFFLINE',
 )
 for key in _PASSTHROUGH_ENV_KEYS:
     value = os.environ.get(key)
@@ -98,8 +107,13 @@ image = (
     .add_local_dir('app', remote_path='/app/app')
     .add_local_dir('templates', remote_path='/app/templates')
     .add_local_dir('static', remote_path='/app/static')
-    .add_local_dir('voices', remote_path='/app/voices')
 )
+if not VOICES_VOLUME_NAME:
+    image = image.add_local_dir('voices', remote_path='/app/voices')
+
+sync_image = image
+if VOICES_VOLUME_NAME:
+    sync_image = image.add_local_dir('voices', remote_path='/app/voices')
 
 model_volume = modal.Volume.from_name(MODEL_VOLUME_NAME, create_if_missing=True)
 voices_volume: modal.Volume | None = None
@@ -169,7 +183,7 @@ def download_models() -> None:
 
 
 @app.function(
-    image=image,
+    image=sync_image,
     volumes=volumes,
     cpu=1,
     memory=2048,
