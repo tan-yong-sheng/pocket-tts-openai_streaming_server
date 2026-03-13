@@ -2,6 +2,7 @@
 Flask routes for the OpenAI-compatible TTS API.
 """
 
+import re
 import threading
 import time
 
@@ -50,6 +51,58 @@ text_preprocessor = TextPreprocessor(
     remove_stopwords=False,
     remove_extra_whitespace=False,
 )
+
+_RE_SENTENCE_SPLIT = re.compile(r'(?<=[.!?])\s+')
+
+
+def _split_text_for_tts(text: str, max_chars: int) -> list[str]:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return [text]
+
+    sentences = [s.strip() for s in _RE_SENTENCE_SPLIT.split(text.strip()) if s.strip()]
+    if not sentences:
+        return [text]
+
+    chunks: list[str] = []
+    current = ''
+
+    def _flush_current():
+        nonlocal current
+        if current:
+            chunks.append(current)
+            current = ''
+
+    for sentence in sentences:
+        if len(sentence) > max_chars:
+            _flush_current()
+            words = sentence.split()
+            buf = ''
+            for word in words:
+                candidate = word if not buf else f'{buf} {word}'
+                if len(candidate) <= max_chars:
+                    buf = candidate
+                    continue
+                if buf:
+                    chunks.append(buf)
+                if len(word) > max_chars:
+                    for i in range(0, len(word), max_chars):
+                        chunks.append(word[i : i + max_chars])
+                    buf = ''
+                else:
+                    buf = word
+            if buf:
+                chunks.append(buf)
+            continue
+
+        candidate = sentence if not current else f'{current} {sentence}'
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            _flush_current()
+            current = sentence
+
+    _flush_current()
+    return chunks
 
 
 @api.route('/')
@@ -208,10 +261,41 @@ def generate_speech():
             # logger.info(f'Preprocessing text: {text}')
             text = text_preprocessor.process(text)
             # logger.info(f'Preprocessed text: {text}')
+        chunk_chars = Config.CHUNK_MAX_CHARS
+        if Config.CHUNK_CHARS_ALLOW_OVERRIDE:
+            requested_chunk_chars = data.get('chunk_chars')
+            if isinstance(requested_chunk_chars, int):
+                if requested_chunk_chars > 0:
+                    chunk_chars = min(requested_chunk_chars, Config.MAX_INPUT_CHARS)
+                elif requested_chunk_chars == 0:
+                    chunk_chars = 0
+            elif requested_chunk_chars is not None:
+                logger.warning('Ignoring non-integer chunk_chars override: %s', requested_chunk_chars)
+        chunks = _split_text_for_tts(text, chunk_chars)
+        if len(chunks) > 1:
+            logger.info(
+                'Chunking input into %s segments (max %s chars each)',
+                len(chunks),
+                chunk_chars,
+            )
         if use_streaming:
             pre_response_s = time.monotonic() - request_start
+            if len(chunks) > 1:
+                return _stream_audio_chunks(
+                    tts,
+                    voice_state,
+                    chunks,
+                    target_format,
+                    request_start,
+                    pre_response_s,
+                    request_id,
+                )
             return _stream_audio(
                 tts, voice_state, text, target_format, request_start, pre_response_s, request_id
+            )
+        if len(chunks) > 1:
+            return _generate_file_chunked(
+                tts, voice_state, chunks, target_format, request_start, request_id
             )
         return _generate_file(tts, voice_state, text, target_format, request_start, request_id)
 
@@ -300,6 +384,70 @@ def _generate_file(
     return response
 
 
+def _generate_file_chunked(
+    tts,
+    voice_state,
+    chunks: list[str],
+    fmt: str,
+    request_start: float,
+    request_id: str,
+):
+    """Generate complete audio from chunked text and return as file."""
+    import torch
+
+    t0 = time.time()
+    tensors = []
+    total_chars = 0
+    for chunk in chunks:
+        total_chars += len(chunk)
+        tensors.append(tts.generate_audio(voice_state, chunk))
+    generation_time = time.time() - t0
+
+    processed = []
+    for tensor in tensors:
+        if tensor.dim() == 1:
+            tensor = tensor.unsqueeze(0)
+        processed.append(tensor)
+    audio_tensor = processed[0] if len(processed) == 1 else torch.cat(processed, dim=1)
+
+    convert_t0 = time.time()
+    audio_buffer = convert_audio(audio_tensor, tts.sample_rate, fmt)
+    convert_time = time.time() - convert_t0
+    total_s = time.monotonic() - request_start
+    _log_first_request(
+        {
+            'mode': 'non_stream',
+            'format': fmt,
+            'text_len': total_chars,
+            'chunks': len(chunks),
+            'generation_s': round(generation_time, 4),
+            'total_s': round(total_s, 4),
+            'request_id': request_id,
+        }
+    )
+    if Config.REQUEST_TIMING_LOG:
+        _emit_timing_log(
+            'request_timing',
+            {
+                'mode': 'non_stream',
+                'format': fmt,
+                'text_len': total_chars,
+                'chunks': len(chunks),
+                'generation_s': round(generation_time, 4),
+                'convert_s': round(convert_time, 4),
+                'total_s': round(total_s, 4),
+                'request_id': request_id,
+            },
+        )
+
+    response = send_file(
+        audio_buffer, mimetype=get_mime_type(fmt), as_attachment=True, download_name=f'speech.{fmt}'
+    )
+    response.headers[Config.REQUEST_ID_HEADER] = request_id
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 def _stream_audio(
     tts,
     voice_state,
@@ -341,16 +489,17 @@ def _stream_audio(
             return
         first_log['done'] = True
         first_bytes_s = time.monotonic() - request_start
-        _log_first_request(
-            {
-                'mode': 'stream',
-                'format': stream_fmt,
-                'text_len': len(text),
-                'pre_response_s': round(pre_response_s, 4),
-                'first_bytes_s': round(first_bytes_s, 4),
-                'request_id': request_id,
-            }
-        )
+        metrics = {
+            'mode': 'stream',
+            'format': stream_fmt,
+            'text_len': len(text),
+            'pre_response_s': round(pre_response_s, 4),
+            'first_bytes_s': round(first_bytes_s, 4),
+            'request_id': request_id,
+        }
+        _log_first_request(metrics)
+        if Config.TTFA_LOG:
+            _emit_timing_log('ttfa', metrics)
 
     def stream_with_header():
         stream_start = time.monotonic()
@@ -388,6 +537,115 @@ def _stream_audio(
                         'pre_response_s': round(pre_response_s, 4),
                         'total_s': round(total_s, 4),
                         'chunks': counters['chunks'],
+                        'bytes': counters['bytes'],
+                        'request_id': request_id,
+                    },
+                )
+
+    mimetype = get_mime_type(stream_fmt)
+
+    response = Response(stream_with_context(stream_with_header()), mimetype=mimetype)
+    response.headers[Config.REQUEST_ID_HEADER] = request_id
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
+
+
+def _stream_audio_chunks(
+    tts,
+    voice_state,
+    chunks: list[str],
+    fmt: str,
+    request_start: float,
+    pre_response_s: float,
+    request_id: str,
+):
+    """Stream audio chunks from chunked text input."""
+    stream_fmt = fmt
+    if stream_fmt not in ('pcm', 'wav'):
+        logger.warning(
+            "Requested streaming format '%s' is not supported for streaming; "
+            "falling back to 'pcm'.",
+            stream_fmt,
+        )
+        stream_fmt = 'pcm'
+
+    first_log = {'done': False}
+    counters = {'bytes': 0, 'chunks': 0}
+
+    try:
+        stream = tts.generate_audio_stream(voice_state, chunks[0])
+        first_chunk = next(stream, None)
+    except Exception:
+        logger.exception('Streaming generation failed before first chunk')
+        return _error_response('Streaming generation failed', 500, request_id)
+
+    if first_chunk is None:
+        logger.error('Streaming generation produced no audio chunks')
+        return _error_response('Streaming generation produced no audio', 500, request_id)
+
+    def _maybe_log_first_bytes():
+        if first_log['done']:
+            return
+        first_log['done'] = True
+        first_bytes_s = time.monotonic() - request_start
+        metrics = {
+            'mode': 'stream',
+            'format': stream_fmt,
+            'text_len': sum(len(chunk) for chunk in chunks),
+            'chunks': len(chunks),
+            'pre_response_s': round(pre_response_s, 4),
+            'first_bytes_s': round(first_bytes_s, 4),
+            'request_id': request_id,
+        }
+        _log_first_request(metrics)
+        if Config.TTFA_LOG:
+            _emit_timing_log('ttfa', metrics)
+
+    def stream_with_header():
+        stream_start = time.monotonic()
+        try:
+            if stream_fmt == 'wav':
+                _maybe_log_first_bytes()
+                header = write_wav_header(tts.sample_rate, num_channels=1, bits_per_sample=16)
+                counters['bytes'] += len(header)
+                yield header
+
+            _maybe_log_first_bytes()
+            chunk_bytes = tensor_to_pcm_bytes(first_chunk)
+            counters['chunks'] += 1
+            counters['bytes'] += len(chunk_bytes)
+            yield chunk_bytes
+
+            for chunk_tensor in stream:
+                _maybe_log_first_bytes()
+                chunk_bytes = tensor_to_pcm_bytes(chunk_tensor)
+                counters['chunks'] += 1
+                counters['bytes'] += len(chunk_bytes)
+                yield chunk_bytes
+
+            for chunk_text in chunks[1:]:
+                for chunk_tensor in tts.generate_audio_stream(voice_state, chunk_text):
+                    _maybe_log_first_bytes()
+                    chunk_bytes = tensor_to_pcm_bytes(chunk_tensor)
+                    counters['chunks'] += 1
+                    counters['bytes'] += len(chunk_bytes)
+                    yield chunk_bytes
+        except Exception:
+            logger.exception('Streaming generation failed mid-stream')
+        finally:
+            if Config.REQUEST_TIMING_LOG:
+                total_s = time.monotonic() - stream_start
+                _emit_timing_log(
+                    'request_timing',
+                    {
+                        'mode': 'stream',
+                        'format': stream_fmt,
+                        'text_len': sum(len(chunk) for chunk in chunks),
+                        'chunks': len(chunks),
+                        'pre_response_s': round(pre_response_s, 4),
+                        'total_s': round(total_s, 4),
+                        'chunks_out': counters['chunks'],
                         'bytes': counters['bytes'],
                         'request_id': request_id,
                     },

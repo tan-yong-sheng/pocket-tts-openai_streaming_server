@@ -1,6 +1,7 @@
 model2vec-py-api-server/
 
 .env.local
+.env.modal
 .env
 
 # Byte-compiled / optimized / DLL files

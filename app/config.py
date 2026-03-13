@@ -95,6 +95,7 @@ class Config:
     REQUEST_TIMING_LOG_JSON = (
         os.environ.get('POCKET_TTS_REQUEST_TIMING_LOG_JSON', 'false').lower() == 'true'
     )
+    TTFA_LOG = os.environ.get('POCKET_TTS_TTFA_LOG', 'false').lower() == 'true'
     UI_ENABLED = os.environ.get('POCKET_TTS_UI_ENABLED', 'true').lower() == 'true'
     DISABLE_INFERENCE_MODE = (
         os.environ.get('POCKET_TTS_DISABLE_INFERENCE_MODE', 'false').lower() == 'true'
@@ -104,6 +105,10 @@ class Config:
     TORCH_NUM_THREADS = _int_env('POCKET_TTS_TORCH_THREADS')
     TORCH_NUM_INTEROP_THREADS = _int_env('POCKET_TTS_TORCH_INTEROP_THREADS')
     AUTHENTICATION_ALLOWED_TOKENS = _csv_env('AUTHENTICATION_ALLOWED_TOKENS')
+    CHUNK_MAX_CHARS = _int_env('POCKET_TTS_CHUNK_CHARS', 0) or 0
+    CHUNK_CHARS_ALLOW_OVERRIDE = (
+        os.environ.get('POCKET_TTS_CHUNK_CHARS_ALLOW_OVERRIDE', 'false').lower() == 'true'
+    )
 
     @classmethod
     def is_auth_enabled(cls) -> bool:

@@ -238,6 +238,18 @@ class PocketTTSApp:
         from app import init_tts_service
 
         init_tts_service(model_path=_get_model_path(), voices_dir=_get_voices_dir())
+        try:
+            from app.services.tts import get_tts_service
+
+            tts = get_tts_service()
+            warmup_voice = os.environ.get('POCKET_TTS_WARMUP_VOICE', 'alba')
+            warmup_text = os.environ.get('POCKET_TTS_WARMUP_TEXT', 'Hello')
+            if warmup_text:
+                voice_state = tts.get_voice_state(warmup_voice)
+                tts.generate_audio(voice_state, warmup_text)
+                _log_coldstart('warmup inference complete')
+        except Exception as exc:
+            _log_coldstart(f'warmup inference failed: {exc}')
         _log_coldstart('warmup complete')
 
     @modal.wsgi_app()
