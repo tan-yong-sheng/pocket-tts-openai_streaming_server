@@ -19,6 +19,8 @@ from flask import (
 import json
 import uuid
 
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
+
 from app.config import Config
 from app.logging_config import get_logger
 from app.services.audio import (
@@ -53,6 +55,42 @@ text_preprocessor = TextPreprocessor(
 )
 
 _RE_SENTENCE_SPLIT = re.compile(r'(?<=[.!?])\s+')
+
+
+class SpeechRequest(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+
+    model: StrictStr | None = None
+    input: StrictStr = Field(..., min_length=1)
+    voice: StrictStr | None = None
+    response_format: StrictStr | None = None
+    format: StrictStr | None = None
+    stream_format: StrictStr | None = None
+
+    @field_validator('model')
+    @classmethod
+    def _validate_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in Config.ALLOWED_MODELS:
+            raise ValueError(
+                f"Unsupported model '{value}'. Allowed: {', '.join(Config.ALLOWED_MODELS)}."
+            )
+        return value
+
+    @field_validator('voice', mode='before')
+    @classmethod
+    def _normalize_voice(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            candidate = value.get('id') or value.get('name')
+            if not candidate:
+                raise ValueError("Voice object must include 'id' or 'name'.")
+            return candidate
+        if isinstance(value, str):
+            return value
+        raise ValueError("'voice' must be a string")
 
 
 def _split_text_for_tts(text: str, max_chars: int) -> list[str]:
@@ -105,6 +143,128 @@ def _split_text_for_tts(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
+def _default_param_suggestions() -> dict:
+    model_default = Config.ALLOWED_MODELS[0] if Config.ALLOWED_MODELS else Config.MODEL_NAME
+    return {
+        'model': model_default,
+        'voice': Config.DEFAULT_VOICE or 'alba',
+        'response_format': 'mp3',
+    }
+
+
+def _log_invalid_param(param: str, provided, request_id: str, extra: dict | None = None) -> None:
+    payload = {
+        'param': param,
+        'provided': provided,
+        'defaults': _default_param_suggestions(),
+        'request_id': request_id,
+    }
+    if extra:
+        payload.update(extra)
+    logger.warning('Invalid request parameter: %s', payload)
+
+
+def _handle_validation_error(exc: ValidationError, raw_data: dict | None, request_id: str):
+    errors = exc.errors()
+    if not errors:
+        return _error_response('Invalid request', 400, request_id)
+
+    first = errors[0]
+    loc = first.get('loc', ())
+    param = loc[0] if loc else None
+    err_type = first.get('type', '')
+
+    if param == 'model':
+        provided = raw_data.get('model') if isinstance(raw_data, dict) else None
+        _log_invalid_param(
+            'model',
+            provided,
+            request_id,
+            {'allowed_models': Config.ALLOWED_MODELS},
+        )
+        return _error_response(
+            f"Unsupported model '{provided}'. Use '{Config.ALLOWED_MODELS[0]}' (case-sensitive).",
+            401,
+            request_id,
+            param='model',
+            error_type='invalid_request_error',
+            extra={
+                'allowed_models': Config.ALLOWED_MODELS,
+                'hint': 'Use /v1/models to list available models',
+                'suggested_defaults': _default_param_suggestions(),
+            },
+        )
+
+    if param == 'input':
+        if err_type in ('missing', 'string_too_short'):
+            return _error_response(
+                "Missing 'input' text",
+                400,
+                request_id,
+                param='input',
+                error_type='invalid_request_error',
+            )
+        if err_type in ('string_type',):
+            return _error_response(
+                "'input' must be a string",
+                400,
+                request_id,
+                param='input',
+                error_type='invalid_request_error',
+            )
+
+    if param == 'voice':
+        return _error_response(
+            "'voice' must be a string",
+            400,
+            request_id,
+            param='voice',
+            error_type='invalid_request_error',
+        )
+
+    if param == 'stream_format':
+        provided = raw_data.get('stream_format') if isinstance(raw_data, dict) else None
+        _log_invalid_param(
+            'stream_format',
+            provided,
+            request_id,
+            {'allowed_stream_formats': ('audio', 'sse')},
+        )
+        return _error_response(
+            "'stream_format' must be a string",
+            400,
+            request_id,
+            param='stream_format',
+            error_type='invalid_request_error',
+        )
+
+    if param == 'response_format':
+        return _error_response(
+            "'response_format' must be a string",
+            400,
+            request_id,
+            param='response_format',
+            error_type='invalid_request_error',
+        )
+
+    if param == 'format':
+        return _error_response(
+            "'format' must be a string",
+            400,
+            request_id,
+            param='format',
+            error_type='invalid_request_error',
+        )
+
+    return _error_response(
+        first.get('msg', 'Invalid request'),
+        400,
+        request_id,
+        param=param,
+        error_type='invalid_request_error',
+    )
+
+
 @api.route('/')
 def home():
     """Serve the web interface."""
@@ -118,6 +278,7 @@ def home():
                     'status': 'ok',
                     'endpoints': {
                         'health': '/health',
+                        'models': '/v1/models',
                         'voices': '/v1/voices',
                         'speech': '/v1/audio/speech',
                     },
@@ -179,17 +340,40 @@ def list_voices():
     )
 
 
+@api.route('/v1/models', methods=['GET'])
+def list_models():
+    """
+    List available models.
+
+    Returns OpenAI-compatible model list format.
+    """
+    models = Config.ALLOWED_MODELS
+    return jsonify(
+        {
+            'object': 'list',
+            'data': [
+                {
+                    'id': model_id,
+                    'object': 'model',
+                    'owned_by': 'pocket-tts',
+                }
+                for model_id in models
+            ],
+        }
+    )
+
+
 @api.route('/v1/audio/speech', methods=['POST'])
 def generate_speech():
     """
     OpenAI-compatible speech generation endpoint.
 
     Request body:
-        model: string (ignored, for compatibility)
+        model: string (optional) - Model name (case-sensitive, only "pocket-tts")
         input: string (required) - Text to synthesize
         voice: string (optional) - Voice ID or path
         response_format: string (optional) - Audio format
-        stream: boolean (optional) - Enable streaming
+        stream_format: string (optional) - "audio" (raw bytes) or "sse" (not supported)
 
     Returns:
         Audio file or streaming audio response
@@ -203,26 +387,43 @@ def generate_speech():
     if not data:
         return _error_response('Missing JSON body', 400, request_id)
 
-    text = data.get('input')
-    if not text:
-        return _error_response("Missing 'input' text", 400, request_id)
-    if not isinstance(text, str):
-        return _error_response("'input' must be a string", 400, request_id)
+    if isinstance(data, dict) and 'stream' in data:
+        _log_invalid_param(
+            'stream',
+            data.get('stream'),
+            request_id,
+            {'hint': "Use 'stream_format' set to 'audio' for streaming."},
+        )
+        return _error_response(
+            "'stream' is not supported; use 'stream_format' instead",
+            400,
+            request_id,
+            extra={'hint': "Set 'stream_format' to 'audio' for streaming."},
+            param='stream',
+            error_type='invalid_request_error',
+        )
+
+    try:
+        payload = SpeechRequest.model_validate(data)
+    except ValidationError as exc:
+        return _handle_validation_error(exc, data, request_id)
+
+    text = payload.input
     if len(text) > Config.MAX_INPUT_CHARS:
         return _error_response(
             f"'input' exceeds max length of {Config.MAX_INPUT_CHARS} characters",
             413,
             request_id,
+            param='input',
+            error_type='invalid_request_error',
         )
 
-    voice = data.get('voice', 'alba')
-    if not isinstance(voice, str):
-        return _error_response("'voice' must be a string", 400, request_id)
-    stream_request = data.get('stream', False)
+    voice = payload.voice or Config.DEFAULT_VOICE or 'alba'
+    stream_format = payload.stream_format
 
-    response_format = data.get('response_format', 'mp3')
-    if not isinstance(response_format, str):
-        return _error_response("'response_format' must be a string", 400, request_id)
+    response_format = payload.response_format
+    if response_format is None:
+        response_format = payload.format or 'mp3'
     target_format = validate_format(response_format)
 
     tts = get_tts_service()
@@ -231,24 +432,75 @@ def generate_speech():
     is_valid, msg = tts.validate_voice(voice)
     if not is_valid:
         available = [v['id'] for v in tts.list_voices()]
+        _log_invalid_param(
+            'voice',
+            voice,
+            request_id,
+            {'available_voices': available[:10]},
+        )
         return _error_response(
             f"Voice '{voice}' not found",
-            400,
+            401,
             request_id,
-            {
+            extra={
                 'available_voices': available[:10],  # Limit to first 10
                 'hint': 'Use /v1/voices to see all available voices',
+                'suggested_defaults': _default_param_suggestions(),
             },
+            param='voice',
+            error_type='invalid_request_error',
         )
 
     try:
         voice_state = tts.get_voice_state(voice)
 
         # Check if streaming should be used
-        use_streaming = stream_request or current_app.config.get('STREAM_DEFAULT', False)
+        stream_requested = False
+        if stream_format is not None:
+            normalized_format = stream_format.strip().lower()
+            allowed_formats = ('audio', 'sse')
+            if normalized_format not in allowed_formats:
+                return _error_response(
+                    "Invalid 'stream_format'. Use 'audio' for streaming.",
+                    400,
+                    request_id,
+                    extra={
+                        'allowed_stream_formats': allowed_formats,
+                        'supported_stream_formats': ('audio',),
+                    },
+                    param='stream_format',
+                    error_type='invalid_request_error',
+                )
+            if normalized_format == 'sse':
+                return _error_response(
+                    "stream_format 'sse' is not supported. Use 'audio' for streaming.",
+                    400,
+                    request_id,
+                    extra={
+                        'supported_stream_formats': ('audio',),
+                    },
+                    param='stream_format',
+                    error_type='invalid_request_error',
+                )
+            use_streaming = True
+            stream_requested = True
+        else:
+            use_streaming = False
 
         # Streaming supports only PCM/WAV today; fall back to file for other formats.
         if use_streaming and target_format not in ('pcm', 'wav'):
+            if stream_requested:
+                return _error_response(
+                    "Streaming is only supported for 'pcm' or 'wav' response_format values.",
+                    400,
+                    request_id,
+                    extra={
+                        'supported_stream_formats': ('pcm', 'wav'),
+                        'hint': "Remove 'stream_format' for full-file responses.",
+                    },
+                    param='response_format',
+                    error_type='invalid_request_error',
+                )
             logger.warning(
                 "Streaming format '%s' is not supported; returning full file instead.",
                 target_format,
@@ -301,7 +553,12 @@ def generate_speech():
 
     except ValueError as e:
         logger.warning(f'Voice loading failed: {e}')
-        return _error_response(str(e), 400, request_id)
+        return _error_response(
+            str(e),
+            400,
+            request_id,
+            error_type='invalid_request_error',
+        )
     except Exception as e:
         logger.exception('Generation failed')
         return _error_response('Generation failed', 500, request_id)
@@ -326,10 +583,35 @@ def _log_first_request(metrics: dict) -> None:
     _emit_timing_log('first_request_timing', metrics)
 
 
-def _error_response(message: str, status_code: int, request_id: str, extra: dict | None = None):
-    payload = {'error': message, 'request_id': request_id}
+def _error_response(
+    message: str,
+    status_code: int,
+    request_id: str,
+    extra: dict | None = None,
+    param: str | None = None,
+    code: str | None = None,
+    error_type: str | None = None,
+):
+    if error_type is None:
+        if status_code == 401:
+            error_type = 'authentication_error'
+        elif status_code in (400, 413, 422):
+            error_type = 'invalid_request_error'
+        elif status_code >= 500:
+            error_type = 'server_error'
+        else:
+            error_type = 'unknown_error'
+
+    error_payload = {
+        'message': message,
+        'type': error_type,
+        'param': param,
+        'code': code,
+    }
     if extra:
-        payload.update(extra)
+        error_payload['details'] = extra
+
+    payload = {'error': error_payload}
     response = jsonify(payload)
     response.status_code = status_code
     response.headers[Config.REQUEST_ID_HEADER] = request_id

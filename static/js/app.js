@@ -447,18 +447,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 					input: text,
 					voice: voice,
 					response_format: fmt,
-					stream: stream,
+					...(stream ? { stream_format: 'audio' } : {}),
 				}),
 			});
 
 			if (!response.ok) {
 				const err = await response.json();
-				throw new Error(err.error || response.statusText);
+				const message =
+					typeof err?.error === 'string'
+						? err.error
+						: err?.error?.message || response.statusText;
+				throw new Error(message);
 			}
 
 			// Currently we always fetch the full blob and play it once ready.
-			// The `stream` flag is still sent to the server, but client playback
-			// uses a single blob path for robustness.
+			// Client playback uses a single blob path for robustness.
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			audioPlayer.src = url;

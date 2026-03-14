@@ -50,6 +50,7 @@ class Config:
     PORT = int(os.environ.get('POCKET_TTS_PORT', '49112'))
 
     # Model settings
+    MODEL_NAME = os.environ.get('POCKET_TTS_MODEL_NAME', 'pocket-tts')
     MODEL_PATH = os.environ.get('POCKET_TTS_MODEL_PATH', None)
     DEFAULT_VOICE = os.environ.get(
         'POCKET_TTS_DEFAULT_VOICE', 'hf://kyutai/tts-voices/alba-mackenna/casual.wav'
@@ -57,9 +58,6 @@ class Config:
 
     # Voice directory
     VOICES_DIR = os.environ.get('POCKET_TTS_VOICES_DIR', None)
-
-    # Streaming default
-    STREAM_DEFAULT = os.environ.get('POCKET_TTS_STREAM_DEFAULT', 'false').lower() == 'true'
 
     # Text preprocessing default
     TEXT_PREPROCESS_DEFAULT = (
@@ -122,6 +120,8 @@ class Config:
 
     # Built-in voice mappings (these are resolved by pocket-tts internally)
     BUILTIN_VOICES = ['alba', 'marius', 'javert', 'jean', 'fantine', 'cosette', 'eponine', 'azelma']
+
+    ALLOWED_MODELS = _csv_env('POCKET_TTS_ALLOWED_MODELS') or [MODEL_NAME]
 
     # Supported audio extensions for custom voices
     VOICE_EXTENSIONS = ('.wav', '.mp3', '.flac', '.safetensors')

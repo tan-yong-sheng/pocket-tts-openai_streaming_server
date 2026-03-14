@@ -48,8 +48,7 @@ server.py                    # Entry point, CLI, starts Waitress
 	"model": "tts-1",
 	"input": "Text to speak",
 	"voice": "alba",
-	"response_format": "mp3",
-	"stream": false
+	"response_format": "mp3"
 }
 ```
 
@@ -60,7 +59,6 @@ server.py                    # Entry point, CLI, starts Waitress
 | `POCKET_TTS_HOST`           | `0.0.0.0` | Bind address       |
 | `POCKET_TTS_PORT`           | `49112`   | Port               |
 | `POCKET_TTS_VOICES_DIR`     | None      | Custom voices path |
-| `POCKET_TTS_STREAM_DEFAULT` | `true`    | Default streaming  |
 | `POCKET_TTS_LOG_LEVEL`      | `INFO`    | Log verbosity      |
 
 ## Voice Resolution Order

@@ -34,15 +34,11 @@ Examples:
     # Custom port and voices directory
     python server.py --port 8080 --voices-dir ./my_voices
 
-    # Enable streaming by default
-    python server.py --stream
-
 Environment Variables:
     POCKET_TTS_HOST         Server host (default: 0.0.0.0)
     POCKET_TTS_PORT         Server port (default: 49112)
     POCKET_TTS_MODEL_PATH   Path to model file
     POCKET_TTS_VOICES_DIR   Path to voices directory
-    POCKET_TTS_STREAM_DEFAULT Enable streaming by default
     POCKET_TTS_TEXT_PREPROCESS_DEFAULT Enable text preprocessing by default
     POCKET_TTS_LOG_DIR      Log directory path
         """,
@@ -67,12 +63,6 @@ Environment Variables:
         default=Config.VOICES_DIR,
         dest='voices_dir',
         help='Directory containing voice files',
-    )
-    parser.add_argument(
-        '--stream',
-        action='store_true',
-        default=Config.STREAM_DEFAULT,
-        help='Enable streaming by default for all requests',
     )
     parser.add_argument(
         '--text-preprocess',
@@ -100,9 +90,7 @@ def main():
     os.environ.setdefault('POCKET_TTS_LOG_LEVEL', args.log_level)
 
     # Create app
-    app = create_app(
-        {'STREAM_DEFAULT': args.stream, 'TEXT_PREPROCESS_DEFAULT': args.text_preprocess}
-    )
+    app = create_app({'TEXT_PREPROCESS_DEFAULT': args.text_preprocess})
 
     logger = get_logger()
 

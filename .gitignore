@@ -1,4 +1,5 @@
 model2vec-py-api-server/
+supertonic-tts-openai_streaming_server/
 
 .env.local
 .env.modal

@@ -33,9 +33,6 @@ def create_app(config_overrides: dict = None) -> Flask:
         static_folder=Config.get_static_folder(),
     )
 
-    # Apply default config
-    app.config['STREAM_DEFAULT'] = Config.STREAM_DEFAULT
-
     # Apply overrides
     if config_overrides:
         app.config.update(config_overrides)

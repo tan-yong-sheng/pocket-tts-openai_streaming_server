@@ -5,10 +5,11 @@
 flask>=3.0.0
 waitress>=3.0.0
 pocket-tts>=1.1.0
+pydantic>=2.6.0,<3.0.0
 
 # Audio processing
-torch>=2.0.0,<=2.8.0
-torchaudio>=2.0.0,<=2.8.0
+torch>=2.0.0,<2.8.0
+torchaudio>=2.0.0,<2.8.0
 scipy>=1.10.0
 numpy>=1.24.0
 soundfile>=0.12.0

@@ -69,9 +69,6 @@ python server.py --help
 # Custom port and voices
 python server.py --port 8080 --voices-dir ./my_voices
 
-# Enable streaming by default
-python server.py --stream
-
 # Enable text preprocessing
 python server.py --text-preprocess
 ```
@@ -108,7 +105,7 @@ Open `http://localhost:49112` in your browser to access the built-in web UI:
 curl http://localhost:49112/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "tts-1",
+    "model": "pocket-tts",
     "input": "Hello world! This is a test.",
     "voice": "alba"
   }' \
@@ -127,7 +124,7 @@ client = OpenAI(
 
 # Generate and save audio
 response = client.audio.speech.create(
-    model="tts-1",
+    model="pocket-tts",
     voice="alba",
     input="Hello world! This is a test."
 )
@@ -135,10 +132,11 @@ response.stream_to_file("output.mp3")
 
 # Streaming
 with client.audio.speech.with_streaming_response.create(
-    model="tts-1",
+    model="pocket-tts",
     voice="alba",
     input="This is streaming audio.",
-    response_format="pcm"
+    response_format="pcm",
+    stream_format="audio"
 ) as response:
     for chunk in response.iter_bytes():
         # Process audio chunks in real-time
@@ -151,6 +149,7 @@ with client.audio.speech.with_streaming_response.create(
 | ------------------ | ------ | ---------------------------------------- |
 | `/`                | GET    | Web interface                            |
 | `/health`          | GET    | Health check for container orchestration |
+| `/v1/models`       | GET    | List available models                    |
 | `/v1/voices`       | GET    | List available voices                    |
 | `/v1/audio/speech` | POST   | Generate speech audio                    |
 
@@ -158,11 +157,11 @@ with client.audio.speech.with_streaming_response.create(
 
 | Parameter         | Type    | Required | Default | Description                                        |
 | ----------------- | ------- | -------- | ------- | -------------------------------------------------- |
-| `model`           | string  | No       | -       | Ignored (for OpenAI compatibility)                 |
+| `model`           | string  | No       | -       | Model name (case-sensitive): `pocket-tts`          |
 | `input`           | string  | Yes      | -       | Text to synthesize                                 |
 | `voice`           | string  | No       | `alba`  | Voice ID (see `/v1/voices`)                        |
 | `response_format` | string  | No       | `mp3`   | Output format: `mp3`, `wav`, `pcm`, `opus`, `flac` |
-| `stream`          | boolean | No       | `false` | Enable streaming response                          |
+| `stream_format`   | string  | No       | -       | Enable streaming: `audio`                          |
 
 ## Custom Voices
 
@@ -213,10 +212,11 @@ The `voices/` directory includes 150+ community-contributed voices.
 | ------------------------------------| ---------- | -------------------------------------- |
 | `POCKET_TTS_HOST`                   | `0.0.0.0`  | Server bind address                    |
 | `POCKET_TTS_PORT`                   | `49112`    | Server port                            |
-| `POCKET_TTS_VOICES_DIR`             | `./voices` | Custom voices directory                |
+| `POCKET_TTS_VOICES_DIR`             | -          | Custom voices directory                |
+| `POCKET_TTS_MODEL_NAME`             | `pocket-tts` | API model name                         |
+| `POCKET_TTS_ALLOWED_MODELS`         | `pocket-tts` | Comma-separated allowed model names    |
 | `POCKET_TTS_MODEL_PATH`             | -          | Custom model path                      |
-| `POCKET_TTS_STREAM_DEFAULT`         | `true`     | Enable streaming by default            |
-| `POCKET_TTS_TEXT_PREPROCESS_DEFAULT`| `true`     | Enable text preprocessing by default   |
+| `POCKET_TTS_TEXT_PREPROCESS_DEFAULT`| `false`    | Enable text preprocessing by default   |
 | `POCKET_TTS_LOG_LEVEL`              | `INFO`     | Log level: DEBUG, INFO, WARNING, ERROR |
 | `POCKET_TTS_LOG_DIR`                | `./logs`   | Log files directory                    |
 | `POCKET_TTS_UI_ENABLED`             | `true`     | Enable the web UI on `/`               |

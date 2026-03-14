@@ -49,13 +49,7 @@ if not "!INPUT_VOICES!"=="" (
     set "VOICES_DIR=--voices-dir "!INPUT_VOICES!""
 )
 
-:: 5. Streaming Default
-:: Changed: Defaults to ON. Only unsets if the user types 'N'.
-set "STREAM_ARG=--stream"
-set /p "INPUT_STREAM=Enable Streaming? (Y/N) [Y]: "
-if /i "%INPUT_STREAM%"=="N" set "STREAM_ARG="
-
-:: 6. Text Preprocessing Default
+:: 5. Text Preprocessing Default
 :: Defaults to ON. Only unsets if the user types 'N'.
 set "TEXT_PREPROCESS_ARG=--text-preprocess"
 set /p "INPUT_PREPROCESS=Enable Text Preprocessing? (Y/N) [Y]: "
@@ -68,14 +62,13 @@ echo Host: %HOST%
 echo Port: %PORT%
 if defined MODEL_PATH echo Model: %MODEL_PATH%
 if defined VOICES_DIR (echo Voices: %VOICES_DIR%) else (echo Voices: Default/None)
-if defined STREAM_ARG (echo Streaming: Enabled) else (echo Streaming: Disabled)
 if defined TEXT_PREPROCESS_ARG (echo Text Preprocessing: Enabled) else (echo Text Preprocessing: Disabled)
 echo ========================================================
 echo.
 
-:: 7. Run Command
+:: 6. Run Command
 if exist "%~dp0PocketTTS-Server.exe" (
-    "%~dp0PocketTTS-Server.exe" --host %HOST% --port %PORT% %MODEL_PATH% %VOICES_DIR% %STREAM_ARG% %TEXT_PREPROCESS_ARG%
+    "%~dp0PocketTTS-Server.exe" --host %HOST% --port %PORT% %MODEL_PATH% %VOICES_DIR% %TEXT_PREPROCESS_ARG%
 ) else (
     echo [ERROR] PocketTTS-Server.exe not found in the current directory.
     echo Please make sure the executable is located in: %~dp0

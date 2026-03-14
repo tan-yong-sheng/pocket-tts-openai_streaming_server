@@ -56,13 +56,7 @@ if "!INPUT_VOICES!"=="" (
     set "VOICES_DIR_ARG=--voices-dir "!INPUT_VOICES!""
 )
 
-:: 6. Streaming Default
-:: Changed: Defaults to ON. Only unsets if the user types 'N'.
-set "STREAM_ARG=--stream"
-set /p "INPUT_STREAM=Enable Streaming? (Y/N) [Y]: "
-if /i "%INPUT_STREAM%"=="N" set "STREAM_ARG="
-
-:: 7. Text Preprocessing Default
+:: 6. Text Preprocessing Default
 :: Defaults to ON. Only unsets if the user types 'N'.
 set "TEXT_PREPROCESS_ARG=--text-preprocess"
 set /p "INPUT_PREPROCESS=Enable Text Preprocessing? (Y/N) [Y]: "
@@ -75,13 +69,12 @@ echo Host: %HOST%
 echo Port: %PORT%
 if defined MODEL_PATH echo Model: %MODEL_PATH%
 if defined VOICES_DIR echo Voices: %VOICES_DIR%
-if defined STREAM_ARG echo Streaming: Enabled
 if defined TEXT_PREPROCESS_ARG echo Text Preprocessing: Enabled
 echo ========================================================
 echo.
 
-:: 8. Run Command
-python server.py --host %HOST% --port %PORT% %MODEL_PATH% %VOICES_DIR_ARG% %STREAM_ARG% %TEXT_PREPROCESS_ARG%
+:: 7. Run Command
+python server.py --host %HOST% --port %PORT% %MODEL_PATH% %VOICES_DIR_ARG% %TEXT_PREPROCESS_ARG%
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
