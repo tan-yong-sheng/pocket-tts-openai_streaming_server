@@ -41,6 +41,8 @@ def create_app(config_overrides: dict = None) -> Flask:
     def _auth_guard():
         if request.method == 'OPTIONS':
             return None
+        if request.path == '/health':
+            return None
         if not Config.is_auth_enabled():
             return None
 
